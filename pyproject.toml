@@ -1,0 +1,32 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "mountainash-capabilities"
+version = "0.1.0"
+description = "Explicit Mountainash witness execution and retained evidence"
+requires-python = ">=3.12"
+dependencies = [
+  "mountainash @ git+https://github.com/mountainash-io/mountainash.git@9f43cf818223c02793a6e5f516edaf2924f5339f",
+]
+
+[project.optional-dependencies]
+dev = ["pytest==8.3.5", "build", "hatchling", "ruff"]
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/mountainash_capabilities"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I"]
