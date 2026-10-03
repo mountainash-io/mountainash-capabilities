@@ -9,7 +9,6 @@ import os
 import sys
 from collections import defaultdict
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import Any
 
 _PROTOCOL_VERSION = 1
@@ -107,12 +106,14 @@ class Reporter:
                 version = importlib.metadata.version(name)
                 packages.append({"name": name, "version": version, "status": "recorded"})
             except Exception as exc:
-                packages.append({
-                    "name": name,
-                    "version": None,
-                    "status": "unavailable",
-                    "error_type": type(exc).__name__,
-                })
+                packages.append(
+                    {
+                        "name": name,
+                        "version": None,
+                        "status": "unavailable",
+                        "error_type": type(exc).__name__,
+                    }
+                )
         self.emit(
             "startup",
             captured_at=_now(),
@@ -274,8 +275,10 @@ class Reporter:
         self._started_occurrences[nodeid] += 1
         selected = self._selected_occurrences.get(nodeid, [])
         candidates = [row["occurrence"] for row in self.candidates if row["nodeid"] == nodeid]
-        occurrence = selected[index] if index < len(selected) else (
-            candidates[index] if index < len(candidates) else index
+        occurrence = (
+            selected[index]
+            if index < len(selected)
+            else (candidates[index] if index < len(candidates) else index)
         )
         self.active[nodeid] = occurrence
         self.emit("item_attempt", nodeid=nodeid, occurrence=occurrence)
@@ -345,7 +348,9 @@ class Reporter:
 
 def register_reporter_hooks(pytest: Any, reporter_type: type[Reporter]) -> None:
     """Apply pytest decorators only after importing the target interpreter's pytest."""
-    reporter_type.pytest_collection = pytest.hookimpl(hookwrapper=True)(reporter_type.pytest_collection)
+    reporter_type.pytest_collection = pytest.hookimpl(hookwrapper=True)(
+        reporter_type.pytest_collection
+    )
     for name in (
         "pytest_runtest_setup",
         "pytest_runtest_call",

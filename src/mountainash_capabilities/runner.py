@@ -22,10 +22,10 @@ from .records import (
     Record,
     RunResult,
     issue,
+    parse_time,
     sanitize_request,
     serialize_environment,
     utc_now,
-    parse_time,
     validate_request,
 )
 
@@ -74,8 +74,10 @@ def decode_events(path: Path) -> tuple[list[Record], list[Record]]:
                     problems.append(issue("truncated_event_line", "decode", line=line_number))
                 try:
                     event = json.loads(
-                        raw.decode("utf-8"), object_pairs_hook=_strict_object,
-                        parse_constant=_reject_constant, parse_float=_finite_float,
+                        raw.decode("utf-8"),
+                        object_pairs_hook=_strict_object,
+                        parse_constant=_reject_constant,
+                        parse_float=_finite_float,
                     )
                     if not isinstance(event, dict):
                         raise ValueError("event must be an object")
@@ -83,17 +85,36 @@ def decode_events(path: Path) -> tuple[list[Record], list[Record]]:
                     if type(sequence) is not int or sequence < 0:
                         raise ValueError("missing event sequence")
                 except (UnicodeError, ValueError, TypeError, RecursionError) as exc:
-                    problems.append(issue("malformed_event", "decode", line=line_number,
-                                          error_type=type(exc).__name__))
+                    problems.append(
+                        issue(
+                            "malformed_event",
+                            "decode",
+                            line=line_number,
+                            error_type=type(exc).__name__,
+                        )
+                    )
                     continue
                 if sequence != expected:
-                    problems.append(issue("event_sequence_gap", "decode", line=line_number,
-                                          expected=expected, observed=sequence))
+                    problems.append(
+                        issue(
+                            "event_sequence_gap",
+                            "decode",
+                            line=line_number,
+                            expected=expected,
+                            observed=sequence,
+                        )
+                    )
                 expected = sequence + 1
                 events.append(event)
     except (OSError, ValueError) as exc:
-        problems.append(issue("event_stream_unavailable", "decode",
-                              error_type=type(exc).__name__, errno=getattr(exc, "errno", None)))
+        problems.append(
+            issue(
+                "event_stream_unavailable",
+                "decode",
+                error_type=type(exc).__name__,
+                errno=getattr(exc, "errno", None),
+            )
+        )
     return events, problems
 
 
@@ -227,14 +248,18 @@ def _source_facts(request: PytestRequest) -> tuple[Record, list[Record]]:
         if status.returncode == 0:
             facts["dirty"] = {"value": bool(status.stdout.strip()), "status": "recorded"}
         else:
-            problems.append(issue("source_status_unavailable", "source", returncode=status.returncode))
+            problems.append(
+                issue("source_status_unavailable", "source", returncode=status.returncode)
+            )
     except (OSError, subprocess.TimeoutExpired, UnicodeDecodeError, ValueError) as exc:
-        problems.append(issue(
-            "source_acquisition_unavailable",
-            "source",
-            error_type=type(exc).__name__,
-            errno=getattr(exc, "errno", None),
-        ))
+        problems.append(
+            issue(
+                "source_acquisition_unavailable",
+                "source",
+                error_type=type(exc).__name__,
+                errno=getattr(exc, "errno", None),
+            )
+        )
     facts["acquisition_issues"] = problems
     return facts, problems
 
@@ -344,7 +369,9 @@ def _case_key(nodeid: str, occurrence: int) -> tuple[str, int]:
     return nodeid, occurrence
 
 
-def _account(events: list[Record], problems: list[Record]) -> tuple[Record, list[Record], list[Record]]:
+def _account(
+    events: list[Record], problems: list[Record]
+) -> tuple[Record, list[Record], list[Record]]:
     execution: Record = {
         "coverage": "unknown",
         "collection_completed": False,
@@ -403,22 +430,20 @@ def _account(events: list[Record], problems: list[Record]) -> tuple[Record, list
                 continue
             execution["candidates"].append(nodeid)
         elif kind == "selected":
-            selected_receipt_seen = True
             items = event.get("items")
-            if not isinstance(items, list):
+            if not isinstance(items, list) or any(
+                not isinstance(item, dict)
+                or type(item.get("nodeid")) is not str
+                or type(item.get("occurrence")) is not int
+                or item["occurrence"] < 0
+                for item in items
+            ):
                 issues.append(issue("malformed_selected_receipt", "accounting"))
                 accounting_loss = True
                 continue
+            selected_receipt_seen = True
             for item in items:
-                if not isinstance(item, dict):
-                    issues.append(issue("malformed_selected_item", "accounting"))
-                    accounting_loss = True
-                    continue
-                nodeid, occurrence = item.get("nodeid"), item.get("occurrence")
-                if type(nodeid) is not str or type(occurrence) is not int or occurrence < 0:
-                    issues.append(issue("malformed_selected_item", "accounting"))
-                    accounting_loss = True
-                    continue
+                nodeid, occurrence = item["nodeid"], item["occurrence"]
                 key = _case_key(nodeid, occurrence)
                 selected_keys.append(key)
                 execution["selected"].append(nodeid)
@@ -450,10 +475,17 @@ def _account(events: list[Record], problems: list[Record]) -> tuple[Record, list
             get_case(nodeid, occurrence)
         elif kind == "phase_attempt":
             nodeid, occurrence, phase = (
-                event.get("nodeid"), event.get("occurrence"), event.get("phase")
+                event.get("nodeid"),
+                event.get("occurrence"),
+                event.get("phase"),
             )
-            if (type(nodeid) is not str or type(occurrence) is not int or occurrence < 0
-                    or type(phase) is not str or phase not in _PHASES):
+            if (
+                type(nodeid) is not str
+                or type(occurrence) is not int
+                or occurrence < 0
+                or type(phase) is not str
+                or phase not in _PHASES
+            ):
                 issues.append(issue("malformed_phase_attempt", "accounting"))
                 accounting_loss = True
                 continue
@@ -462,7 +494,9 @@ def _account(events: list[Record], problems: list[Record]) -> tuple[Record, list
                 case["attempted_phases"].append(phase)
         elif kind == "report":
             phase, nodeid, occurrence = (
-                event.get("phase"), event.get("nodeid"), event.get("occurrence")
+                event.get("phase"),
+                event.get("nodeid"),
+                event.get("occurrence"),
             )
             outcome = event.get("outcome")
             position = event.get("report_position")
@@ -534,15 +568,27 @@ def _account(events: list[Record], problems: list[Record]) -> tuple[Record, list
             issues.append(issue(code if type(code) is str else "child_adapter_issue", "accounting"))
             accounting_loss = True
         elif kind == "serialization_error":
-            issues.append(issue(
-                "event_serialization_failed",
-                "accounting",
-                source_type=event.get("source_type") if type(event.get("source_type")) is str else "unknown",
-                error_type=event.get("error_type") if type(event.get("error_type")) is str else "unknown",
-            ))
+            issues.append(
+                issue(
+                    "event_serialization_failed",
+                    "accounting",
+                    source_type=event.get("source_type")
+                    if type(event.get("source_type")) is str
+                    else "unknown",
+                    error_type=event.get("error_type")
+                    if type(event.get("error_type")) is str
+                    else "unknown",
+                )
+            )
             accounting_loss = True
         else:
-            issues.append(issue("unknown_child_event", "accounting", event_type=kind if type(kind) is str else "unknown"))
+            issues.append(
+                issue(
+                    "unknown_child_event",
+                    "accounting",
+                    event_type=kind if type(kind) is str else "unknown",
+                )
+            )
             accounting_loss = True
 
     if not collection_receipt_seen:
@@ -640,13 +686,15 @@ def _context(events: list[Record], request: PytestRequest, issues: list[Record])
     try:
         from mountainash.core.capabilities.capture import Environment, EnvironmentCoordinate
 
-        native = Environment(tuple(
-            EnvironmentCoordinate("package", name, version) for name, version in versions
-        ))
+        native = Environment(
+            tuple(EnvironmentCoordinate("package", name, version) for name, version in versions)
+        )
         environment = serialize_environment(native)
     except Exception as exc:
         environment_error = type(exc).__name__
-        problem = issue("environment_serialization_unavailable", "context", error_type=environment_error)
+        problem = issue(
+            "environment_serialization_unavailable", "context", error_type=environment_error
+        )
         issues.append(problem)
 
     target_start: Record
@@ -690,8 +738,12 @@ def _context(events: list[Record], request: PytestRequest, issues: list[Record])
 
     if startup is None:
         status = "unavailable"
-    elif missing or environment_error or not start_valid or not end_valid or any(
-        entry["status"] != "recorded" for entry in acquisitions
+    elif (
+        missing
+        or environment_error
+        or not start_valid
+        or not end_valid
+        or any(entry["status"] != "recorded" for entry in acquisitions)
     ):
         status = "partial"
     else:
@@ -711,7 +763,6 @@ def _context(events: list[Record], request: PytestRequest, issues: list[Record])
         "status": status,
         "acquisitions": acquisitions,
     }
-
 
 
 def _prepare_private_run(
@@ -798,10 +849,20 @@ def _launch_and_wait(
             errno=getattr(exc, "errno", None),
         )
         problems.append(problem)
-        return None, "launch_failed", False, False, False, True, False, time.monotonic() - started, {
-            "error_type": type(exc).__name__,
-            "errno": getattr(exc, "errno", None),
-        }
+        return (
+            None,
+            "launch_failed",
+            False,
+            False,
+            False,
+            True,
+            False,
+            time.monotonic() - started,
+            {
+                "error_type": type(exc).__name__,
+                "errno": getattr(exc, "errno", None),
+            },
+        )
 
     if out_stream is not None:
         out_stream.close()
@@ -854,7 +915,9 @@ def _launch_and_wait(
     )
 
 
-def run_pytest(request: PytestRequest, destination: Path, *, cancel: Event | None = None) -> RunResult:
+def run_pytest(
+    request: PytestRequest, destination: Path, *, cancel: Event | None = None
+) -> RunResult:
     """Run precisely the requested pytest invocation and retain observed facts."""
     validate_request(request)
     retained_request, notices = sanitize_request(request)
@@ -928,14 +991,19 @@ def run_pytest(request: PytestRequest, destination: Path, *, cancel: Event | Non
             returncode = process.returncode
     except (OSError, ValueError, TypeError) as exc:
         process_status = "launch_failed"
-        launch_error = {"stage": "private_work", "error_type": type(exc).__name__,
-                        "errno": getattr(exc, "errno", None)}
-        problems.append(issue(
-            "private_work_failed",
-            "launch",
-            error_type=type(exc).__name__,
-            errno=getattr(exc, "errno", None),
-        ))
+        launch_error = {
+            "stage": "private_work",
+            "error_type": type(exc).__name__,
+            "errno": getattr(exc, "errno", None),
+        }
+        problems.append(
+            issue(
+                "private_work_failed",
+                "launch",
+                error_type=type(exc).__name__,
+                errno=getattr(exc, "errno", None),
+            )
+        )
         reaped = True
     record["issues"].extend(problems)
     if launch_error is not None:
@@ -972,9 +1040,9 @@ def run_pytest(request: PytestRequest, destination: Path, *, cancel: Event | Non
             record["issues"].append(problem)
             record["artifacts"][role] = {
                 "availability": "unavailable",
-                "content": "redacted" if (role == "events" and not request.retention.raw) else (
-                    "redacted" if not request.retention.raw else "original"
-                ),
+                "content": "redacted"
+                if (role == "events" and not request.retention.raw)
+                else ("redacted" if not request.retention.raw else "original"),
                 "reason": "capture_cutoff_unavailable",
             }
     cutoff = utc_now()
@@ -999,9 +1067,9 @@ def run_pytest(request: PytestRequest, destination: Path, *, cancel: Event | Non
             record["issues"].append(problem)
             record["artifacts"][role] = {
                 "availability": "unavailable",
-                "content": "redacted" if (role == "events" and not request.retention.raw) else (
-                    "redacted" if not request.retention.raw else "original"
-                ),
+                "content": "redacted"
+                if (role == "events" and not request.retention.raw)
+                else ("redacted" if not request.retention.raw else "original"),
                 "reason": "snapshot_failed",
             }
 
@@ -1019,19 +1087,25 @@ def run_pytest(request: PytestRequest, destination: Path, *, cancel: Event | Non
     record["issues"].extend(accounting_issues)
     record["context"] = _context(events, request, record["issues"])
     record["context"]["supplied_facts"] = retained_request["supplied_metadata"]
- 
+
     if not request.retention.raw:
         record["artifacts"]["stdout"] = {
-            "availability": "omitted", "content": "redacted", "reason": "raw_retention_disabled"
+            "availability": "omitted",
+            "content": "redacted",
+            "reason": "raw_retention_disabled",
         }
         record["artifacts"]["stderr"] = {
-            "availability": "omitted", "content": "redacted", "reason": "raw_retention_disabled"
+            "availability": "omitted",
+            "content": "redacted",
+            "reason": "raw_retention_disabled",
         }
     for role in ("stdout", "stderr", "events"):
         if role in snapshot_paths:
             record["artifacts"][role] = {
                 "availability": "unavailable",
-                "content": "redacted" if (role == "events" and not request.retention.raw) else "original",
+                "content": "redacted"
+                if (role == "events" and not request.retention.raw)
+                else "original",
                 "reason": "awaiting_publication",
             }
 
@@ -1060,15 +1134,33 @@ def run_pytest(request: PytestRequest, destination: Path, *, cancel: Event | Non
 
     if work is not None and os.path.lexists(work):
         try:
-            shutil.rmtree(work)
+            # Executable arguments are private, even when evidence publication fails.
+            (work / "request.json").unlink(missing_ok=True)
         except OSError as exc:
-            problem = issue(
-                "private_work_cleanup_failed",
-                "cleanup",
-                path=str(work),
-                error_type=type(exc).__name__,
-                errno=exc.errno,
+            persistence_issues.append(
+                issue(
+                    "private_config_cleanup_failed",
+                    "cleanup",
+                    path=str(work),
+                    error_type=type(exc).__name__,
+                    errno=exc.errno,
+                )
             )
-            record["issues"].append(problem)
-            persistence_issues.append(problem)
+        if persistence_issues:
+            persistence_issues.append(
+                issue("unpublished_output_retained", "cleanup", path=str(work))
+            )
+        else:
+            try:
+                shutil.rmtree(work)
+            except OSError as exc:
+                persistence_issues.append(
+                    issue(
+                        "private_work_cleanup_failed",
+                        "cleanup",
+                        path=str(work),
+                        error_type=type(exc).__name__,
+                        errno=exc.errno,
+                    )
+                )
     return RunResult(record, record_dir, tuple(persistence_issues))

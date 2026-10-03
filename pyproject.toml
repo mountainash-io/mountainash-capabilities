@@ -6,6 +6,7 @@ build-backend = "hatchling.build"
 name = "mountainash-capabilities"
 version = "0.1.0"
 description = "Explicit Mountainash witness execution and retained evidence"
+readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
   "mountainash @ git+https://github.com/mountainash-io/mountainash.git@9f43cf818223c02793a6e5f516edaf2924f5339f",

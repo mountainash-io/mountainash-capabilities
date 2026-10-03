@@ -2,6 +2,7 @@ import sys
 
 import pytest
 
+
 @pytest.fixture
 def valid_record():
     """Return a factory for a complete, minimal format-1 observation."""
@@ -11,7 +12,11 @@ def valid_record():
             "format_version": 1,
             "kind": "pytest_execution",
             "id": identity,
-            "producer": {"name": "mountainash-capabilities", "version": "0.1.0", "protocol_version": 1},
+            "producer": {
+                "name": "mountainash-capabilities",
+                "version": "0.1.0",
+                "protocol_version": 1,
+            },
             "captured_at": "2026-10-03T12:00:00Z",
             "ended_at": "2026-10-03T12:00:01Z",
             "elapsed_seconds": 1.0,

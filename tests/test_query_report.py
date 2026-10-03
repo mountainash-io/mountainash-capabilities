@@ -10,6 +10,7 @@ from markdown_it import MarkdownIt
 
 def retained(tmp_path, valid_record, **changes):
     from mountainash_capabilities.store import publish, reserve
+
     entry = reserve(tmp_path)
     record = valid_record(identity=entry.name)
     record.update(changes)
@@ -21,6 +22,7 @@ def retained(tmp_path, valid_record, **changes):
 def test_filtered_query_keeps_unknown_coverage(tmp_path, valid_record):
     from mountainash_capabilities import Query, query_observations
     from mountainash_capabilities.store import reserve
+
     retained(tmp_path, valid_record)
     broken = reserve(tmp_path)
     (broken / "record.json").write_text("{broken")
@@ -33,17 +35,26 @@ def test_filtered_query_keeps_unknown_coverage(tmp_path, valid_record):
 def test_exact_witness_roles_and_filter_conjunction(tmp_path, valid_record):
     from mountainash_capabilities import Query, query_observations, render_markdown
     from mountainash_capabilities.store import publish, reserve
+
     entry = reserve(tmp_path)
     record = valid_record(identity=entry.name)
     record["execution"]["deselected"] = ["test_excluded.py::test_other"]
     publish(entry, record, {})
     nodeid = record["reports"][0]["nodeid"]
-    matching = query_observations(tmp_path, Query(
-        witness=nodeid, process_status="exited", coverage_status="complete", context_status="recorded"
-    ))
+    matching = query_observations(
+        tmp_path,
+        Query(
+            witness=nodeid,
+            process_status="exited",
+            coverage_status="complete",
+            context_status="recorded",
+        ),
+    )
     assert [x.record["id"] for x in matching.records] == [entry.name]
     assert not query_observations(tmp_path, Query(witness="tests/test_example.py")).records
-    assert not query_observations(tmp_path, Query(witness=nodeid, coverage_status="partial")).records
+    assert not query_observations(
+        tmp_path, Query(witness=nodeid, coverage_status="partial")
+    ).records
     deselected = query_observations(tmp_path, Query(witness="test_excluded.py::test_other"))
     assert [x.record["id"] for x in deselected.records] == [entry.name]
     markdown = render_markdown(deselected)
@@ -53,30 +64,41 @@ def test_exact_witness_roles_and_filter_conjunction(tmp_path, valid_record):
 
 def test_time_filter_half_open_and_ordered(tmp_path, valid_record):
     from mountainash_capabilities import Query, query_observations
+
     later, _ = retained(tmp_path, valid_record, captured_at="2026-10-03T12:00:01Z")
     earlier, _ = retained(tmp_path, valid_record, captured_at="2026-10-03T12:00:00Z")
-    result = query_observations(tmp_path, Query(
-        captured_from="2026-10-03T12:00:00+00:00", captured_before="2026-10-03T12:00:01Z"
-    ))
+    result = query_observations(
+        tmp_path,
+        Query(captured_from="2026-10-03T12:00:00+00:00", captured_before="2026-10-03T12:00:01Z"),
+    )
     assert [x.record["id"] for x in result.records] == [earlier.name]
     assert [x.record["id"] for x in query_observations(tmp_path, Query()).records] == [
-        earlier.name, later.name
+        earlier.name,
+        later.name,
     ]
 
 
-@pytest.mark.parametrize("kwargs", [
-    {"process_status": "success"}, {"coverage_status": "passed"}, {"context_status": "known"},
-    {"captured_from": "yesterday"}, {"captured_before": "2026-10-03T12:00:00"},
-    {"captured_from": "2026-10-04T00:00:00Z", "captured_before": "2026-10-03T00:00:00Z"},
-])
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"process_status": "success"},
+        {"coverage_status": "passed"},
+        {"context_status": "known"},
+        {"captured_from": "yesterday"},
+        {"captured_before": "2026-10-03T12:00:00"},
+        {"captured_from": "2026-10-04T00:00:00Z", "captured_before": "2026-10-03T00:00:00Z"},
+    ],
+)
 def test_invalid_filters_are_errors(tmp_path, kwargs):
     from mountainash_capabilities import Query, query_observations
+
     with pytest.raises(ValueError):
         query_observations(tmp_path, Query(**kwargs))
 
 
 def test_missing_destination_is_not_complete_empty_search(tmp_path):
     from mountainash_capabilities import Query, query_observations
+
     result = query_observations(tmp_path / "missing", Query())
     assert result.records == ()
     assert not result.complete
@@ -85,6 +107,7 @@ def test_missing_destination_is_not_complete_empty_search(tmp_path):
 
 def test_empty_query_exports_retain_provenance(tmp_path):
     from mountainash_capabilities import Query, export_json, query_observations
+
     first, second = tmp_path / "first", tmp_path / "second"
     first.mkdir()
     second.mkdir()
@@ -98,12 +121,14 @@ def test_empty_query_exports_retain_provenance(tmp_path):
 
 
 def test_failure_and_missing_artifact_visible_without_markup_injection(tmp_path, valid_record):
-    from mountainash_capabilities import read_observation, render_markdown, export_json
+    from mountainash_capabilities import export_json, read_observation, render_markdown
     from mountainash_capabilities.store import publish, reserve
+
     entry = reserve(tmp_path)
     record = valid_record(identity=entry.name)
     record["reports"][0]["diagnostic"] = {
-        "availability": "retained", "text": "<script>alert(1)</script> | ``` [bad](https://bad)"
+        "availability": "retained",
+        "text": "<script>alert(1)</script> | ``` [bad](https://bad)",
     }
     source = tmp_path / "raw"
     source.write_bytes(b"diagnostic")
@@ -136,7 +161,37 @@ print(export_json(r))
     env["PYTHONPATH"] = str(Path(__file__).resolve().parents[1] / "src")
     run = subprocess.run(
         [sys.executable, "-c", script, str(entry.parent), entry.name],
-        cwd=tmp_path, env=env, text=True, capture_output=True, check=True, timeout=15,
+        cwd=tmp_path,
+        env=env,
+        text=True,
+        capture_output=True,
+        check=True,
+        timeout=15,
     )
     assert "test_expected_failure" in run.stdout
     assert json.loads(run.stdout)
+
+
+def test_leading_backtick_nodeid_cannot_activate_html(valid_record):
+    from mountainash_capabilities import ReadResult, render_markdown
+
+    record = valid_record()
+    record["reports"][0]["nodeid"] = "`<img src=x>"
+    rendered = MarkdownIt("commonmark", {"html": True}).render(
+        render_markdown(ReadResult(record, ()))
+    )
+    assert "<img" not in rendered
+    assert "&lt;img src=x&gt;" in rendered
+
+
+def test_retained_output_sections_remain_visible(valid_record):
+    from mountainash_capabilities import ReadResult, render_markdown
+
+    record = valid_record()
+    record["reports"][0]["sections"] = {
+        "availability": "retained",
+        "items": [{"name": "Captured stdout call", "text": "captured-output-marker"}],
+    }
+    rendered = MarkdownIt().render(render_markdown(ReadResult(record, ())))
+    assert "Captured stdout call" in rendered
+    assert "captured-output-marker" in rendered

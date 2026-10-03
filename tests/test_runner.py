@@ -7,6 +7,7 @@ from pathlib import Path
 
 def _run(tmp_path, source, *, selection=("test_case.py",), args=(), raw=True, **request_options):
     from mountainash_capabilities import PytestRequest, Retention, run_pytest
+
     suite = tmp_path / "suite"
     suite.mkdir(parents=True, exist_ok=True)
     if source is not None:
@@ -44,7 +45,6 @@ def _strings(value):
             yield from _strings(child)
 
 
-
 def _dicts(value):
     if isinstance(value, dict):
         yield value
@@ -53,6 +53,7 @@ def _dicts(value):
     elif isinstance(value, (list, tuple)):
         for child in value:
             yield from _dicts(child)
+
 
 def _case(observation, nodeid):
     return next(case for case in observation["execution"]["cases"] if case["nodeid"] == nodeid)
@@ -121,8 +122,10 @@ def test_xfail_and_xpass_preserve_pytest_representation(tmp_path):
         "    if case == 'lookalike': pytest.fail('[XPASS(strict)] helper-shaped failure')\n",
         args=("-rxX",),
     )
-    reports = {report["nodeid"].rsplit("[", 1)[-1].rstrip("]"): report
-               for report in _phases(result.observation, "call")}
+    reports = {
+        report["nodeid"].rsplit("[", 1)[-1].rstrip("]"): report
+        for report in _phases(result.observation, "call")
+    }
 
     assert reports["xfail"]["outcome"] == "skipped"
     assert reports["xfail"]["wasxfail_present"] is True
@@ -135,13 +138,17 @@ def test_xfail_and_xpass_preserve_pytest_representation(tmp_path):
 
 
 def test_collection_failure_is_not_empty_success(tmp_path):
-    result = _run(tmp_path, "raise RuntimeError('collection exploded')\ndef test_never_runs(): pass\n")
+    result = _run(
+        tmp_path, "raise RuntimeError('collection exploded')\ndef test_never_runs(): pass\n"
+    )
     observation = result.observation
 
     assert observation["process"]["returncode"] != 0
     assert observation["execution"]["coverage"] != "empty"
-    assert any(report["phase"] == "collection" and report["outcome"] == "failed"
-               for report in observation["reports"])
+    assert any(
+        report["phase"] == "collection" and report["outcome"] == "failed"
+        for report in observation["reports"]
+    )
     assert observation["execution"]["collection_completed"] is False
 
 
@@ -186,7 +193,9 @@ def test_launch_and_missing_dependency_failures_remain_observations(tmp_path):
     suite = tmp_path / "launch-suite"
     suite.mkdir()
     request = PytestRequest(
-        python=suite / "missing-python", cwd=suite, selection=("test_case.py",),
+        python=suite / "missing-python",
+        cwd=suite,
+        selection=("test_case.py",),
         retention=Retention(raw=True),
     )
     launch = run_pytest(request, tmp_path / "launch-evidence").observation
@@ -212,7 +221,9 @@ def test_empty_request_does_not_launch_pytest(tmp_path):
     )
     for selection in ((), ("",)):
         request = PytestRequest(
-            python=Path(sys.executable), cwd=suite, selection=selection,
+            python=Path(sys.executable),
+            cwd=suite,
+            selection=selection,
             retention=Retention(raw=True),
         )
         try:
@@ -333,8 +344,11 @@ def test_cancellation_waits_for_readiness_and_cleans_up_thread(tmp_path):
     outcome = []
     failure = []
     request = PytestRequest(
-        python=Path(sys.executable), cwd=suite, selection=("test_case.py",),
-        retention=Retention(raw=True), terminate_grace_seconds=0.1,
+        python=Path(sys.executable),
+        cwd=suite,
+        selection=("test_case.py",),
+        retention=Retention(raw=True),
+        terminate_grace_seconds=0.1,
     )
 
     def execute():
@@ -417,8 +431,11 @@ def test_duplicate_nodeids_do_not_overwrite_reports(tmp_path):
 
     assert len(reports) == 2
     assert reports[0]["occurrence"] != reports[1]["occurrence"]
-    cases = [case for case in result.observation["execution"]["cases"]
-             if case["nodeid"] == "test_case.py::test_twice"]
+    cases = [
+        case
+        for case in result.observation["execution"]["cases"]
+        if case["nodeid"] == "test_case.py::test_twice"
+    ]
     assert len(cases) == 2
     assert any("ambiguous" in value.lower() for value in _strings(result.observation))
 
@@ -475,7 +492,9 @@ def test_target_receipt_records_import_path_and_adapter_version(tmp_path):
 
 def test_authorized_diagnostic_is_visible_in_rendered_report(tmp_path):
     from markdown_it import MarkdownIt
+
     from mountainash_capabilities import render_markdown
+
     result = _run(tmp_path, "def test_bad(): assert False, 'specific-failure-marker'\n")
     rendered = MarkdownIt().render(render_markdown(result))
     assert "specific-failure-marker" in rendered
@@ -483,6 +502,7 @@ def test_authorized_diagnostic_is_visible_in_rendered_report(tmp_path):
 
 def test_event_loss_and_numeric_overflow_are_explicit(tmp_path):
     from mountainash_capabilities.runner import decode_events
+
     result = _run(tmp_path, "def test_receipt(): assert True\n")
     path = result.record_dir / _artifact(result.observation, "events")["path"]
     lines = path.read_bytes().splitlines(keepends=True)
@@ -491,3 +511,47 @@ def test_event_loss_and_numeric_overflow_are_explicit(tmp_path):
     assert any(x["code"] == "event_sequence_gap" for x in problems)
     assert any(x["code"] == "malformed_event" for x in problems)
     assert any("test_case.py::test_receipt" in set(_strings(event)) for event in events)
+
+
+def test_malformed_selected_scope_cannot_be_empty_evidence(tmp_path):
+    from mountainash_capabilities.runner import _account, decode_events
+
+    result = _run(tmp_path, "def test_scope(): assert True\n")
+    path = result.record_dir / _artifact(result.observation, "events")["path"]
+    events, problems = decode_events(path)
+    for event in events:
+        if event["type"] == "selected":
+            event["items"] = "malformed"
+    execution, _, issues = _account(events, problems)
+    assert execution["coverage"] == "unknown"
+    assert issues
+
+
+def test_failed_publication_preserves_authorized_output(tmp_path):
+    from mountainash_capabilities import PytestRequest, Retention, run_pytest
+
+    suite = tmp_path / "suite"
+    suite.mkdir()
+    destination = tmp_path / "evidence"
+    (suite / "test_case.py").write_text(
+        "from pathlib import Path\n"
+        "def test_claim():\n"
+        "    print('retained-output-after-publication-failure')\n"
+        f"    entry = next(Path({str(destination)!r}).iterdir())\n"
+        "    (entry / '.publish-claim').touch()\n"
+    )
+    result = run_pytest(
+        PytestRequest(
+            Path(sys.executable), suite, ("test_case.py",), Retention(raw=True), args=("-s",)
+        ),
+        destination,
+    )
+    assert any(x["code"] == "publication_in_progress" for x in result.persistence_issues)
+    retained = [x for x in result.persistence_issues if x["code"] == "unpublished_output_retained"]
+    assert retained
+    location = Path(retained[0]["path"])
+    assert any(
+        b"retained-output-after-publication-failure" in file.read_bytes()
+        for file in location.iterdir()
+        if file.is_file()
+    )

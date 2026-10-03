@@ -138,20 +138,48 @@ def validate_record(record: Record) -> None:
             raise ValueError(f"missing {key} object")
     required = {
         "producer": {"name", "version", "protocol_version"},
-        "request": {"python", "cwd", "selection", "args", "packages", "source_checkout",
-                    "timeout_seconds", "terminate_grace_seconds", "retention", "supplied_metadata"},
+        "request": {
+            "python",
+            "cwd",
+            "selection",
+            "args",
+            "packages",
+            "source_checkout",
+            "timeout_seconds",
+            "terminate_grace_seconds",
+            "retention",
+            "supplied_metadata",
+        },
         "source": {"checkout", "revision", "dirty", "acquisition_issues"},
-        "context": {"companion", "target_start", "target_end", "environment", "supplied_facts", "status"},
-        "process": {"status", "returncode", "signal", "launch_error", "elapsed_seconds",
-                    "termination", "cleanup"},
+        "context": {
+            "companion",
+            "target_start",
+            "target_end",
+            "environment",
+            "supplied_facts",
+            "status",
+        },
+        "process": {
+            "status",
+            "returncode",
+            "signal",
+            "launch_error",
+            "elapsed_seconds",
+            "termination",
+            "cleanup",
+        },
     }
     for group, keys in required.items():
         if not keys <= record[group].keys():
             raise ValueError(f"missing {group} facts")
     if record["producer"]["protocol_version"] != 1:
         raise ValueError("unsupported adapter protocol")
-    for group, key in (("request", "python"), ("request", "cwd"),
-                       ("producer", "name"), ("producer", "version")):
+    for group, key in (
+        ("request", "python"),
+        ("request", "cwd"),
+        ("producer", "name"),
+        ("producer", "version"),
+    ):
         if type(record[group][key]) is not str:
             raise ValueError(f"invalid {group}.{key}")
     elapsed = record["process"]["elapsed_seconds"]
@@ -161,15 +189,21 @@ def validate_record(record: Record) -> None:
     if not isinstance(environment, dict) or not isinstance(environment.get("coordinates"), list):
         raise ValueError("invalid environment encoding")
     for coordinate in environment["coordinates"]:
-        if not isinstance(coordinate, dict) or not {
-            "kind", "name", "version", "original_label"
-        } <= coordinate.keys():
+        if (
+            not isinstance(coordinate, dict)
+            or not {"kind", "name", "version", "original_label"} <= coordinate.keys()
+        ):
             raise ValueError("invalid environment coordinate")
     if set(record["artifacts"]) != {"stdout", "stderr", "events"}:
         raise ValueError("unknown or missing artifact role")
     for key in ("reports", "issues"):
         if not isinstance(record.get(key), list):
             raise ValueError(f"missing {key} array")
+    for problem in record["issues"]:
+        if not isinstance(problem, dict) or any(
+            type(problem.get(key)) is not str for key in ("code", "stage")
+        ):
+            raise ValueError("invalid retained issue")
     for key in ("captured_at", "ended_at"):
         parse_time(record.get(key))
     for group, key, allowed in (
@@ -180,7 +214,10 @@ def validate_record(record: Record) -> None:
         if type(record[group].get(key)) is not str or record[group][key] not in allowed:
             raise ValueError(f"invalid {group}.{key}")
     request = record["request"]
-    if not isinstance(request.get("retention"), dict) or type(request["retention"].get("raw")) is not bool:
+    if (
+        not isinstance(request.get("retention"), dict)
+        or type(request["retention"].get("raw")) is not bool
+    ):
         raise ValueError("missing raw retention choice")
     for key in ("selection", "args", "packages"):
         if not isinstance(request.get(key), list) or any(type(x) is not str for x in request[key]):
@@ -188,7 +225,15 @@ def validate_record(record: Record) -> None:
     execution = record["execution"]
     if type(execution.get("collection_completed")) is not bool:
         raise ValueError("missing collection completion")
-    for key in ("candidates", "selected", "deselected", "attempted", "finished", "unexecuted", "cases"):
+    for key in (
+        "candidates",
+        "selected",
+        "deselected",
+        "attempted",
+        "finished",
+        "unexecuted",
+        "cases",
+    ):
         if not isinstance(execution.get(key), list):
             raise ValueError(f"missing execution {key}")
         if key != "cases" and any(type(x) is not str for x in execution[key]):
@@ -199,7 +244,10 @@ def validate_record(record: Record) -> None:
         if type(case.get("occurrence")) is not int or case["occurrence"] < 0:
             raise ValueError("invalid occurrence")
         if type(case.get("terminal_item")) is not bool or case.get("call_status") not in {
-            "reported", "not_executed", "unfinished", "unknown"
+            "reported",
+            "not_executed",
+            "unfinished",
+            "unknown",
         }:
             raise ValueError("invalid case completion")
         for key in ("attempted_phases", "reported_phases"):
@@ -221,19 +269,38 @@ def validate_record(record: Record) -> None:
                 raise ValueError(f"invalid report {key}")
         if "duration_seconds" not in report or (
             report["duration_seconds"] is not None
-            and (type(report["duration_seconds"]) not in (float, int) or report["duration_seconds"] < 0)
+            and (
+                type(report["duration_seconds"]) not in (float, int)
+                or report["duration_seconds"] < 0
+            )
         ):
             raise ValueError("invalid report duration")
         for key in ("diagnostic", "sections"):
             value = report.get(key)
             if not isinstance(value, dict) or value.get("availability") not in (
-                "retained", "omitted", "unavailable"
+                "retained",
+                "omitted",
+                "unavailable",
             ):
                 raise ValueError(f"missing report {key} availability")
+            if value["availability"] == "retained":
+                if key == "diagnostic" and type(value.get("text")) is not str:
+                    raise ValueError("missing retained diagnostic text")
+                if key == "sections":
+                    items = value.get("items")
+                    if not isinstance(items, list) or any(
+                        not isinstance(item, dict)
+                        or type(item.get("name")) is not str
+                        or type(item.get("text")) is not str
+                        for item in items
+                    ):
+                        raise ValueError("invalid retained sections")
     for role in ("stdout", "stderr", "events"):
         artifact = record["artifacts"].get(role)
         if not isinstance(artifact, dict) or artifact.get("availability") not in {
-            "retained", "omitted", "unavailable"
+            "retained",
+            "omitted",
+            "unavailable",
         }:
             raise ValueError("invalid artifact availability")
         if artifact.get("content") not in {"original", "redacted"}:
@@ -275,11 +342,17 @@ def sanitize_request(request: PytestRequest) -> tuple[Record, list[Record]]:
             if "@" not in parts.netloc and not any(_credential(key) for key, _ in query):
                 return value
             notices.append(issue("redacted", "request", field=field_path))
-            return prefix + urlunsplit((
-                parts.scheme, parts.netloc.rsplit("@", 1)[-1], parts.path,
-                urlencode([(key, "[redacted]" if _credential(key) else val) for key, val in query]),
-                parts.fragment,
-            ))
+            return prefix + urlunsplit(
+                (
+                    parts.scheme,
+                    parts.netloc.rsplit("@", 1)[-1],
+                    parts.path,
+                    urlencode(
+                        [(key, "[redacted]" if _credential(key) else val) for key, val in query]
+                    ),
+                    parts.fragment,
+                )
+            )
         except ValueError:
             notices.append(issue("redacted_invalid_url", "request", field=field_path))
             return prefix + "[redacted URL]"

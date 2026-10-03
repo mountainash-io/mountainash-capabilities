@@ -9,8 +9,6 @@ from pathlib import Path
 import pytest
 
 
-
-
 def issue_codes(result):
     return {issue["code"] for issue in result.issues}
 
@@ -85,7 +83,10 @@ def test_two_writer_processes_publish_independent_reservations(tmp_path, valid_r
         from mountainash_capabilities import read_observation
 
         loaded = read_observation(tmp_path, entry.name)
-        assert loaded.record["reports"][0]["nodeid"] == records[entries.index(entry)]["reports"][0]["nodeid"]
+        assert (
+            loaded.record["reports"][0]["nodeid"]
+            == records[entries.index(entry)]["reports"][0]["nodeid"]
+        )
         assert (entry / "stdout.bin").read_bytes() == payload
 
 
@@ -135,7 +136,11 @@ def test_competing_process_publishers_keep_winning_record_and_bytes(tmp_path, va
     from mountainash_capabilities import read_observation
 
     loaded = read_observation(tmp_path, entry.name)
-    winner = next(record for record, _ in specs if record["reports"][0]["nodeid"] == loaded.record["reports"][0]["nodeid"])
+    winner = next(
+        record
+        for record, _ in specs
+        if record["reports"][0]["nodeid"] == loaded.record["reports"][0]["nodeid"]
+    )
     expected_bytes = next(payload for record, payload in specs if record == winner)
     assert loaded.record["reports"][0]["nodeid"] == winner["reports"][0]["nodeid"]
     assert (entry / "stdout.bin").read_bytes() == expected_bytes
@@ -146,10 +151,10 @@ def test_competing_process_publishers_keep_winning_record_and_bytes(tmp_path, va
         if result["issues"]
     )
 
-def test_publication_to_symlinked_record_directory_is_rejected(tmp_path, valid_record):
-    from mountainash_capabilities.store import publish, reserve
 
-    entry = reserve(tmp_path)
+def test_publication_to_symlinked_record_directory_is_rejected(tmp_path, valid_record):
+    from mountainash_capabilities.store import publish
+
     target = tmp_path / "actual-entry"
     target.mkdir()
     link = tmp_path / "linked-entry"
@@ -158,7 +163,11 @@ def test_publication_to_symlinked_record_directory_is_rejected(tmp_path, valid_r
 
     result = publish(link, record, {})
 
-    assert issue_codes(result) & {"invalid_record_directory", "symlink_record_directory", "publication_failed"}
+    assert issue_codes(result) & {
+        "invalid_record_directory",
+        "symlink_record_directory",
+        "publication_failed",
+    }
     assert not (target / "record.json").exists()
 
 
@@ -195,7 +204,6 @@ def test_fresh_process_reads_published_failure(tmp_path, valid_record):
     assert observed["outcome"] == "failed"
     assert observed["nodeid"] == "tests/test_example.py::test_expected_failure"
     assert observed["issues"] == []
-
 
 
 def test_incomplete_reservation_is_reported_without_a_record(tmp_path):
@@ -254,7 +262,10 @@ def test_missing_retained_artifact_is_reported(tmp_path, valid_record):
     result = read_observation(tmp_path, entry.name)
 
     assert result.record is not None
-    assert any(code in issue_codes(result) for code in ("missing_artifact", "artifact_unavailable", "artifact_integrity"))
+    assert any(
+        code in issue_codes(result)
+        for code in ("missing_artifact", "artifact_unavailable", "artifact_integrity")
+    )
 
 
 def test_hash_mismatched_artifact_is_reported(tmp_path, valid_record):
@@ -270,7 +281,10 @@ def test_hash_mismatched_artifact_is_reported(tmp_path, valid_record):
     result = read_observation(tmp_path, entry.name)
 
     assert result.record is not None
-    assert any(code in issue_codes(result) for code in ("artifact_hash_mismatch", "artifact_integrity", "corrupt_artifact"))
+    assert any(
+        code in issue_codes(result)
+        for code in ("artifact_hash_mismatch", "artifact_integrity", "corrupt_artifact")
+    )
 
 
 def test_invalid_identity_is_rejected_before_publication(tmp_path, valid_record):
@@ -287,7 +301,7 @@ def test_invalid_identity_is_rejected_before_publication(tmp_path, valid_record)
 
 def test_parent_traversal_artifact_reference_is_not_read_outside_entry(tmp_path, valid_record):
     from mountainash_capabilities import read_observation
-    from mountainash_capabilities.store import publish, reserve
+    from mountainash_capabilities.store import reserve
 
     entry = reserve(tmp_path)
     outside = tmp_path / "outside.bin"
@@ -335,7 +349,10 @@ def test_artifact_symlink_is_not_followed(tmp_path, valid_record):
     result = read_observation(tmp_path, entry.name)
 
     assert result.record is not None
-    assert any(code in issue_codes(result) for code in ("artifact_symlink", "invalid_artifact_path", "artifact_integrity"))
+    assert any(
+        code in issue_codes(result)
+        for code in ("artifact_symlink", "invalid_artifact_path", "artifact_integrity")
+    )
     assert outside.read_bytes() == b"secret outside observation"
 
 

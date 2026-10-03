@@ -10,8 +10,19 @@ from pathlib import Path
 from uuid import uuid4
 
 from .records import (
-    CONTEXT_STATUSES, COVERAGE_STATUSES, PROCESS_STATUSES, Query, QueryResult,
-    ReadResult, Record, encode_record, issue, parse_time, utc_now, valid_identity, validate_record,
+    CONTEXT_STATUSES,
+    COVERAGE_STATUSES,
+    PROCESS_STATUSES,
+    Query,
+    QueryResult,
+    ReadResult,
+    Record,
+    encode_record,
+    issue,
+    parse_time,
+    utc_now,
+    valid_identity,
+    validate_record,
 )
 
 _ARTIFACTS = {"stdout": "stdout.bin", "stderr": "stderr.bin", "events": "events.jsonl"}
@@ -112,7 +123,9 @@ def publish(record_dir: Path, record: Record, artifacts: dict[str, Path]) -> Rea
     for role, filename in _ARTIFACTS.items():
         if not raw and role in {"stdout", "stderr"}:
             retained["artifacts"][role] = {
-                "availability": "omitted", "content": "redacted", "reason": "raw_retention_disabled"
+                "availability": "omitted",
+                "content": "redacted",
+                "reason": "raw_retention_disabled",
             }
             continue
         source = artifacts.get(role)
@@ -121,7 +134,9 @@ def publish(record_dir: Path, record: Record, artifacts: dict[str, Path]) -> Rea
         metadata = {
             "availability": "unavailable",
             "content": "redacted" if not raw else "original",
-            "media_type": "application/x-ndjson" if role == "events" else "application/octet-stream",
+            "media_type": "application/x-ndjson"
+            if role == "events"
+            else "application/octet-stream",
             "encoding": "utf-8" if role == "events" else "binary",
         }
         retained["artifacts"][role] = metadata
@@ -146,8 +161,15 @@ def publish(record_dir: Path, record: Record, artifacts: dict[str, Path]) -> Rea
                 )
         except (OSError, ValueError) as exc:
             metadata["reason"] = "artifact_snapshot_failed"
-            problems.append(issue("artifact_unavailable", "publish", role=role,
-                                  error_type=type(exc).__name__, errno=getattr(exc, "errno", None)))
+            problems.append(
+                issue(
+                    "artifact_unavailable",
+                    "publish",
+                    role=role,
+                    error_type=type(exc).__name__,
+                    errno=getattr(exc, "errno", None),
+                )
+            )
 
     retained["issues"].extend(problems)
     temporary = entry / f".record-{uuid4().hex}.tmp"
@@ -159,8 +181,14 @@ def publish(record_dir: Path, record: Record, artifacts: dict[str, Path]) -> Rea
             os.fsync(stream.fileno())
         os.link(temporary, entry / "record.json")
     except (OSError, ValueError) as exc:
-        problems.append(issue("publication_failed", "publish", error_type=type(exc).__name__,
-                              errno=getattr(exc, "errno", None)))
+        problems.append(
+            issue(
+                "publication_failed",
+                "publish",
+                error_type=type(exc).__name__,
+                errno=getattr(exc, "errno", None),
+            )
+        )
         return ReadResult(retained, tuple(problems))
     try:
         temporary.unlink()
@@ -203,8 +231,9 @@ def read_observation(destination: Path, identity: str) -> ReadResult:
             problems.append(issue("invalid_artifact_path", "read", id=identity, role=role))
             continue
         except OSError as exc:
-            problems.append(issue("artifact_unavailable", "read", id=identity, role=role,
-                                  errno=exc.errno))
+            problems.append(
+                issue("artifact_unavailable", "read", id=identity, role=role, errno=exc.errno)
+            )
             continue
         try:
             with _open_regular(path) as stream:
@@ -213,8 +242,15 @@ def read_observation(destination: Path, identity: str) -> ReadResult:
             if size != artifact["size"] or digest != artifact["sha256"]:
                 problems.append(issue("artifact_integrity", "read", id=identity, role=role))
         except (OSError, ValueError) as exc:
-            problems.append(issue("artifact_unavailable", "read", id=identity, role=role,
-                                  error_type=type(exc).__name__))
+            problems.append(
+                issue(
+                    "artifact_unavailable",
+                    "read",
+                    id=identity,
+                    role=role,
+                    error_type=type(exc).__name__,
+                )
+            )
     return ReadResult(record, tuple(problems))
 
 
@@ -283,11 +319,20 @@ def query_observations(destination: Path, query: Query) -> QueryResult:
             continue
         if upper is not None and captured >= upper:
             continue
-        if query.process_status is not None and record["process"].get("status") != query.process_status:
+        if (
+            query.process_status is not None
+            and record["process"].get("status") != query.process_status
+        ):
             continue
-        if query.coverage_status is not None and record["execution"].get("coverage") != query.coverage_status:
+        if (
+            query.coverage_status is not None
+            and record["execution"].get("coverage") != query.coverage_status
+        ):
             continue
-        if query.context_status is not None and record["context"].get("status") != query.context_status:
+        if (
+            query.context_status is not None
+            and record["context"].get("status") != query.context_status
+        ):
             continue
         if query.witness is not None and not _witness_roles(record, query.witness):
             continue

@@ -3,12 +3,20 @@ import json
 import pytest
 
 
-@pytest.mark.parametrize("missing", [
-    "occurrence", "duration_seconds", "report_position", "diagnostic", "sections",
-])
+@pytest.mark.parametrize(
+    "missing",
+    [
+        "occurrence",
+        "duration_seconds",
+        "report_position",
+        "diagnostic",
+        "sections",
+    ],
+)
 def test_missing_report_attribution_is_rejected(tmp_path, valid_record, missing):
     from mountainash_capabilities import read_observation
     from mountainash_capabilities.store import reserve
+
     entry = reserve(tmp_path)
     record = valid_record(identity=entry.name)
     del record["reports"][0][missing]
@@ -21,6 +29,7 @@ def test_missing_report_attribution_is_rejected(tmp_path, valid_record, missing)
 def test_unknown_malformed_artifact_cannot_escape_read_api(tmp_path, valid_record):
     from mountainash_capabilities import read_observation
     from mountainash_capabilities.store import reserve
+
     entry = reserve(tmp_path)
     record = valid_record(identity=entry.name)
     record["artifacts"]["unexpected"] = None
@@ -30,15 +39,40 @@ def test_unknown_malformed_artifact_cannot_escape_read_api(tmp_path, valid_recor
     assert any(x["code"] == "invalid_record" for x in result.issues)
 
 
-@pytest.mark.parametrize("group,field", [
-    ("producer", "protocol_version"), ("request", "python"),
-    ("context", "environment"), ("process", "elapsed_seconds"),
-])
+@pytest.mark.parametrize(
+    "group,field",
+    [
+        ("producer", "protocol_version"),
+        ("request", "python"),
+        ("context", "environment"),
+        ("process", "elapsed_seconds"),
+    ],
+)
 def test_required_observation_facts_cannot_disappear(tmp_path, valid_record, group, field):
-    from mountainash_capabilities.store import reserve, publish
+    from mountainash_capabilities.store import publish, reserve
+
     entry = reserve(tmp_path)
     record = valid_record(identity=entry.name)
     del record[group][field]
     result = publish(entry, record, {})
     assert result.record is None
     assert any(x["code"] == "invalid_record" for x in result.issues)
+
+
+@pytest.mark.parametrize("corrupt", ["issues", "sections"])
+def test_malformed_consumer_data_is_query_coverage_issue(tmp_path, valid_record, corrupt):
+    from mountainash_capabilities import Query, query_observations, render_markdown
+    from mountainash_capabilities.store import reserve
+
+    entry = reserve(tmp_path)
+    record = valid_record(identity=entry.name)
+    if corrupt == "issues":
+        record["issues"] = ["corrupt"]
+    else:
+        record["reports"][0]["sections"] = {"availability": "retained", "items": ["corrupt"]}
+    (entry / "record.json").write_text(json.dumps(record))
+    result = query_observations(tmp_path, Query())
+    assert not result.complete
+    assert not result.records
+    assert any(x["code"] == "invalid_record" for x in result.issues)
+    assert "invalid_record" in render_markdown(result)

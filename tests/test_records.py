@@ -5,6 +5,7 @@ import pytest
 
 def test_native_environment_normalization_preserves_unknown_and_label():
     from mountainash.core.capabilities.capture import Environment, EnvironmentCoordinate
+
     from mountainash_capabilities.records import serialize_environment
 
     env = Environment((EnvironmentCoordinate("package", "ibis", None),))
