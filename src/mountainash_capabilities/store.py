@@ -9,7 +9,10 @@ import stat
 from pathlib import Path
 from uuid import uuid4
 
-from .records import ReadResult, Record, encode_record, issue, utc_now, valid_identity, validate_record
+from .records import (
+    CONTEXT_STATUSES, COVERAGE_STATUSES, PROCESS_STATUSES, Query, QueryResult,
+    ReadResult, Record, encode_record, issue, parse_time, utc_now, valid_identity, validate_record,
+)
 
 _ARTIFACTS = {"stdout": "stdout.bin", "stderr": "stderr.bin", "events": "events.jsonl"}
 _CHUNK = 1024 * 1024
@@ -213,3 +216,81 @@ def read_observation(destination: Path, identity: str) -> ReadResult:
             problems.append(issue("artifact_unavailable", "read", id=identity, role=role,
                                   error_type=type(exc).__name__))
     return ReadResult(record, tuple(problems))
+
+
+def _validate_query(query: Query) -> tuple[object | None, object | None]:
+    if not isinstance(query, Query):
+        raise ValueError("query must be a Query")
+    for key, value, allowed in (
+        ("process_status", query.process_status, PROCESS_STATUSES),
+        ("coverage_status", query.coverage_status, COVERAGE_STATUSES),
+        ("context_status", query.context_status, CONTEXT_STATUSES),
+    ):
+        if value is not None and (type(value) is not str or value not in allowed):
+            raise ValueError(f"invalid {key}")
+    if query.witness is not None and type(query.witness) is not str:
+        raise ValueError("invalid witness")
+    lower = parse_time(query.captured_from) if query.captured_from is not None else None
+    upper = parse_time(query.captured_before) if query.captured_before is not None else None
+    if lower is not None and upper is not None and lower >= upper:
+        raise ValueError("captured_from must precede captured_before")
+    return lower, upper
+
+
+def _witness_roles(record: Record, witness: str) -> tuple[str, ...]:
+    execution = record["execution"]
+    roles = []
+    for role in ("selected", "deselected", "attempted"):
+        if witness in execution[role]:
+            roles.append(role)
+    if any(report["nodeid"] == witness for report in record["reports"]):
+        roles.append("reported")
+    return tuple(roles)
+
+
+def query_observations(destination: Path, query: Query) -> QueryResult:
+    """Enumerate immediate records once; retain independent uncertainty."""
+    lower, upper = _validate_query(query)
+    root = Path(destination).absolute()
+    enumerated_at = utc_now()
+    records = []
+    problems = []
+    try:
+        with os.scandir(root) as entries:
+            names = [entry.name for entry in entries]
+    except OSError as exc:
+        names = []
+        problems.append(issue("destination_unavailable", "query", errno=exc.errno))
+
+    for identity in names:
+        if not valid_identity(identity):
+            problems.append(issue("invalid_entry", "query", entry=identity))
+            continue
+        result = read_observation(root, identity)
+        if result.record is None:
+            problems.extend(result.issues)
+            continue
+        record = result.record
+        # Read/integrity checks happen before filters; every readable record's
+        # current integrity issues remain visible even when it does not match.
+        problems.extend(result.issues)
+        try:
+            captured = parse_time(record["captured_at"])
+        except (ValueError, TypeError):
+            problems.append(issue("invalid_record", "query", id=identity))
+            continue
+        if lower is not None and captured < lower:
+            continue
+        if upper is not None and captured >= upper:
+            continue
+        if query.process_status is not None and record["process"].get("status") != query.process_status:
+            continue
+        if query.coverage_status is not None and record["execution"].get("coverage") != query.coverage_status:
+            continue
+        if query.context_status is not None and record["context"].get("status") != query.context_status:
+            continue
+        if query.witness is not None and not _witness_roles(record, query.witness):
+            continue
+        records.append(result)
+    records.sort(key=lambda item: (parse_time(item.record["captured_at"]), item.record["id"]))
+    return QueryResult(tuple(records), tuple(problems), not problems, query, root, enumerated_at)
